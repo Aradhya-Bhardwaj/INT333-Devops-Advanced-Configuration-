@@ -1,0 +1,75 @@
+- name: Install packages
+  apt:
+    name: [git, acl, python3-venv, python3-pip, nginx]
+    update_cache: true
+
+- name: Create app user
+  user: { name: dropwatch, system: true, home: /home/dropwatch, create_home: true, shell: /usr/sbin/nologin }
+
+- name: Remove stale Ansible temp dir left inside the app dir
+  file: { path: "{{ app_dir }}/.ansible", state: absent }
+
+- name: App directory owned by app user
+  file: { path: "{{ app_dir }}", state: directory, owner: dropwatch, group: dropwatch, mode: "0755" }
+
+- name: Clear leftover files from a failed first run (only if not yet cloned)
+  shell: find {{ app_dir }} -mindepth 1 -delete
+  args: { creates: "{{ app_dir }}/.git" }
+
+- name: Clone / update code
+  git:
+    repo: "{{ repo_url }}"
+    dest: "{{ app_dir }}"
+    version: main
+  become_user: dropwatch
+  notify: restart gunicorn
+
+- name: Python dependencies
+  pip:
+    requirements: "{{ app_dir }}/requirements.txt"
+    virtualenv: "{{ app_dir }}/venv"
+    virtualenv_command: python3 -m venv
+  become_user: dropwatch
+  notify: restart gunicorn
+
+- name: Environment file
+  template: { src: dropwatch.env.j2, dest: /etc/dropwatch.env, owner: root, group: dropwatch, mode: "0640" }
+  notify: restart gunicorn
+
+- name: Migrate
+  command: "{{ app_dir }}/venv/bin/python manage.py migrate --noinput"
+  args: { chdir: "{{ app_dir }}" }
+  environment: { DJANGO_SECRET_KEY: "{{ django_secret_key }}" }
+  become_user: dropwatch
+
+- name: Seed demo data (first deploy only)
+  shell: "{{ app_dir }}/venv/bin/python manage.py shell < scripts/seed_data.py && touch .seeded"
+  args: { chdir: "{{ app_dir }}", creates: "{{ app_dir }}/.seeded" }
+  environment: { DJANGO_SECRET_KEY: "{{ django_secret_key }}" }
+  become_user: dropwatch
+
+- name: Collect static files
+  command: "{{ app_dir }}/venv/bin/python manage.py collectstatic --noinput"
+  args: { chdir: "{{ app_dir }}" }
+  environment: { DJANGO_SECRET_KEY: "{{ django_secret_key }}" }
+  become_user: dropwatch
+
+- name: Gunicorn systemd unit
+  template: { src: gunicorn.service.j2, dest: /etc/systemd/system/gunicorn.service }
+  notify: restart gunicorn
+
+- name: Nginx site
+  template: { src: nginx.conf.j2, dest: /etc/nginx/sites-available/dropwatch }
+  notify: reload nginx
+
+- name: Enable nginx site
+  file: { src: /etc/nginx/sites-available/dropwatch, dest: /etc/nginx/sites-enabled/dropwatch, state: link }
+  notify: reload nginx
+
+- name: Remove default nginx site
+  file: { path: /etc/nginx/sites-enabled/default, state: absent }
+  notify: reload nginx
+
+- name: Start services
+  systemd: { name: "{{ item }}", state: started, enabled: true, daemon_reload: true }
+  loop: [gunicorn, nginx]

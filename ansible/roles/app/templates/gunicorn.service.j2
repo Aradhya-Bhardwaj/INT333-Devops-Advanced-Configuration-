@@ -1,0 +1,14 @@
+[Unit]
+Description=DropWatch gunicorn
+After=network.target
+
+[Service]
+User=dropwatch
+Group=dropwatch
+WorkingDirectory={{ app_dir }}
+EnvironmentFile=/etc/dropwatch.env
+ExecStart={{ app_dir }}/venv/bin/gunicorn dropwatch.wsgi:application --bind 127.0.0.1:8000 --workers 2
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

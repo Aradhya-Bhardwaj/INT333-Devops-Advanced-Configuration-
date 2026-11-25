@@ -1,0 +1,13 @@
+# Usage: ansible-playbook site.yml -e "django_secret_key=$(openssl rand -hex 32)" -e "nagios_password=CHOOSE"
+- name: Deploy DropWatch
+  hosts: app
+  become: true
+  vars:
+    repo_url: https://github.com/Aradhya-Bhardwaj/DropWatch.git
+    app_dir: /opt/dropwatch
+  roles: [app]
+
+- name: Set up Nagios monitoring
+  hosts: monitor
+  become: true
+  roles: [nagios]

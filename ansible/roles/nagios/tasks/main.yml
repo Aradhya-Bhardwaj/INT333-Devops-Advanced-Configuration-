@@ -1,0 +1,32 @@
+- name: Install Nagios and plugins
+  apt:
+    name: [nagios4, nagios-plugins-basic, nagios-plugins-standard, apache2, apache2-utils]
+    update_cache: true
+
+- name: Nagios web UI config (login required)
+  template: { src: nagios4-cgi.conf.j2, dest: /etc/apache2/conf-available/nagios4-cgi.conf }
+  notify: restart apache
+
+- name: Enable Apache modules for the Nagios CGIs
+  apache2_module: { name: "{{ item }}", state: present }
+  loop: [cgi, authz_groupfile, auth_digest]
+  notify: restart apache
+
+- name: Nagios web admin login (digest auth file)
+  copy:
+    dest: /etc/nagios4/htdigest.users
+    content: "nagiosadmin:Nagios4:{{ ('nagiosadmin:Nagios4:' + nagios_password) | hash('md5') }}
+"
+    owner: root
+    group: www-data
+    mode: "0640"
+  no_log: true
+  notify: restart apache
+
+- name: Monitor DropWatch app server
+  template: { src: dropwatch.cfg.j2, dest: /etc/nagios4/conf.d/dropwatch.cfg }
+  notify: restart nagios
+
+- name: Start services
+  systemd: { name: "{{ item }}", state: started, enabled: true }
+  loop: [nagios4, apache2]
