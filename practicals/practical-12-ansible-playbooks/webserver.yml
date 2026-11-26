@@ -1,0 +1,43 @@
+- name: Configure a web server
+  hosts: local
+  become: true
+  vars:
+    page_file: /var/www/html/index.html
+  vars_prompt:
+    - name: page_title
+      prompt: Page title
+      default: Managed by Ansible
+      private: false
+
+  tasks:
+    - name: Install and start nginx
+      tags: [install]
+      block:
+        - name: Install nginx
+          apt:
+            name: nginx
+            update_cache: true
+
+        - name: Start nginx
+          service:
+            name: nginx
+            state: started
+            enabled: true
+      rescue:
+        - name: Report the failure
+          fail:
+            msg: nginx could not be installed or started
+
+    - name: Write the web page
+      tags: [page]
+      copy:
+        dest: "{{ page_file }}"
+        content: "<h1>{{ page_title }}</h1><p>{{ ansible_facts['hostname'] }}</p>"
+        mode: "0644"
+      notify: reload nginx
+
+  handlers:
+    - name: reload nginx
+      service:
+        name: nginx
+        state: reloaded
